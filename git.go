@@ -79,7 +79,6 @@ type TempRepo struct {
 	local          string
 	branch         string
 	RemoteLocation string
-	err            error
 	out            string
 	buf            []int
 }
@@ -120,31 +119,27 @@ func (s *GitRepo) Get() error {
 	var err error
 
 	if branch == "" {
-		for i := 1; i < 6; i++ {
+		for i := 1; i < 50; i++ {
 			err = nil
-			repoValue.err = nil
 			repoValue.out = ""
 			out, err = s.run("git", "clone", "--recursive", remote, local)
 			if err == nil {
 				break
 			}
 
-			repoValue.err = err
 			repoValue.out = string(out)
-			logrus.Warnfp("", i, s.value, repoValue)
+			logrus.Warnfp(fmt.Sprintf("【times:%d】", i), s.value, repoValue)
 		}
 	} else {
 		ok := false
-		for i := 1; i < 6; i++ {
+		for i := 1; i < 50; i++ {
 			err = nil
-			repoValue.err = nil
 			repoValue.out = ""
 			if !ok {
 				out, err = s.run("git", "clone", "--recursive", "-b", branch, remote, local)
 				if err == nil {
 					break
 				}
-				repoValue.err = err
 				repoValue.out = string(out)
 			}
 
@@ -159,10 +154,9 @@ func (s *GitRepo) Get() error {
 					break
 				}
 
-				repoValue.err = err
 				repoValue.out = string(out)
 			}
-			logrus.Warnfp("", i, s.value, repoValue)
+			logrus.Warnfp(fmt.Sprintf("【times:%d】", i), s.value, repoValue)
 		}
 	}
 
@@ -175,8 +169,7 @@ func (s *GitRepo) Get() error {
 		if _, err := os.Stat(basePath); os.IsNotExist(err) {
 			err = os.MkdirAll(basePath, 0755)
 			if err != nil {
-				repoValue.err = err
-				repoValue.out = string(out)
+				repoValue.out = err.Error()
 				logrus.Errorfp("", s.value, repoValue)
 				return NewLocalError("[0] Unable to create directory", err, "")
 			}
@@ -187,8 +180,7 @@ func (s *GitRepo) Get() error {
 			}
 
 			if err != nil {
-				repoValue.err = err
-				repoValue.out = string(out)
+				repoValue.out = err.Error() + "|" + string(out)
 				logrus.Errorfp("", s.value, repoValue)
 				return NewRemoteError("[1] Unable to get repository", err, string(out))
 			}
@@ -196,8 +188,7 @@ func (s *GitRepo) Get() error {
 		}
 
 	} else if err != nil {
-		repoValue.err = err
-		repoValue.out = string(out)
+		repoValue.out = err.Error() + "|" + string(out)
 		logrus.Errorfp("", s.value, repoValue)
 		return NewRemoteError("[2] Unable to get repository", err, string(out))
 	}
@@ -235,16 +226,14 @@ func (s *GitRepo) Init() error {
 		if _, err := os.Stat(basePath); os.IsNotExist(err) {
 			err = os.MkdirAll(basePath, 0755)
 			if err != nil {
-				repoValue.err = err
-				repoValue.out = string(out)
+				repoValue.out = err.Error()
 				logrus.Errorfp("", s.value, repoValue)
 				return NewLocalError("[0] Unable to initialize repository", err, "")
 			}
 
 			out, err = s.run("git", "init", s.LocalPath())
 			if err != nil {
-				repoValue.err = err
-				repoValue.out = string(out)
+				repoValue.out = err.Error() + "|" + string(out)
 				logrus.Errorfp("", s.value, repoValue)
 				return NewLocalError("[1] Unable to initialize repository", err, string(out))
 			}
@@ -252,8 +241,7 @@ func (s *GitRepo) Init() error {
 		}
 
 	} else if err != nil {
-		repoValue.err = err
-		repoValue.out = string(out)
+		repoValue.out = err.Error() + "|" + string(out)
 		logrus.Errorfp("", s.value, repoValue)
 		return NewLocalError("[2] Unable to initialize repository", err, string(out))
 	}
@@ -273,11 +261,28 @@ func (s *GitRepo) Update() error {
 		RemoteLocation: s.RemoteLocation,
 	}
 
-	// Perform a fetch to make sure everything is up to date.
-	out, err := s.RunFromDir("git", "fetch", "--tags", s.RemoteLocation)
-	if err != nil {
-		repoValue.err = err
+	var (
+		out []byte
+		err error
+	)
+
+	for i := 1; i < 50; i++ {
+		// Perform a fetch to make sure everything is up to date.
+		out, err = s.RunFromDir("git", "fetch", "--tags", s.RemoteLocation)
+		if err == nil {
+			break
+		}
 		repoValue.out = string(out)
+
+		outMsg := fmt.Sprintf("Failed to connect to github.com port 443: Connection refused")
+		if !strings.Contains(repoValue.out, outMsg) {
+			break
+		}
+		logrus.Warnfp(fmt.Sprintf("【times:%d】", i), s.value, repoValue)
+	}
+
+	if err != nil {
+		repoValue.out = err.Error() + "|" + string(out)
 		logrus.Errorfp("", s.value, repoValue)
 		return NewRemoteError("[0] Unable to update repository", err, string(out))
 	}
@@ -286,8 +291,7 @@ func (s *GitRepo) Update() error {
 	// out do not attempt a pull. It will cause an error.
 	detached, err := isDetachedHead(s.LocalPath())
 	if err != nil {
-		repoValue.err = err
-		repoValue.out = string(out)
+		repoValue.out = err.Error()
 		logrus.Errorfp("", s.value, repoValue)
 		return NewLocalError("[1] Unable to update repository", err, "")
 	}
@@ -298,8 +302,7 @@ func (s *GitRepo) Update() error {
 
 	out, err = s.RunFromDir("git", "pull")
 	if err != nil {
-		repoValue.err = err
-		repoValue.out = string(out)
+		repoValue.out = err.Error() + "|" + string(out)
 		logrus.Errorfp("", s.value, repoValue)
 		return NewRemoteError("[2] Unable to update repository", err, string(out))
 	}
